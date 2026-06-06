@@ -6,7 +6,7 @@
     },
     "build": {
       "inputs": [{ "step": "install" }],
-      "commands": ["src/main.py"]
+      "commands": ["main.py"]
     }
   },
   "deploy": {
