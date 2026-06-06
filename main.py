@@ -542,29 +542,40 @@ def setup_commands(bot: commands.Bot):
 
     @bot.command(name="unwarn", help="Removes a warning using its unique Warn ID.")
     @commands.has_permissions(kick_members=True)
-    async def unwarn(ctx, warn_id: str):
+    async def unwarn(ctx, *, warn_id: str):
+        warn_id = warn_id.strip()
         guild_id_str = str(ctx.guild.id)
         warns_data = load_warns()
         
-        guild_warns = warns_data.get(guild_id_str, {})
+        if guild_id_str not in warns_data:
+            embed = discord.Embed(
+                title="⚠️ Warning Not Found",
+                description=f"No warning with ID `{warn_id}` was found in this server.",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+            return
+        
         found = False
         target_user_id = None
         target_warn = None
         
-        for user_id, user_list in guild_warns.items():
-            for w in user_list:
+        for user_id in list(warns_data[guild_id_str].keys()):
+            warn_list = warns_data[guild_id_str][user_id]
+            for i, w in enumerate(warn_list):
                 if w['warn_id'] == warn_id:
                     target_user_id = user_id
                     target_warn = w
-                    user_list.remove(w)
+                    warn_list.pop(i)
                     found = True
                     break
             if found:
                 break
                 
         if found:
-            if not guild_warns[target_user_id]:
-                del guild_warns[target_user_id]
+            # Clean up empty entries
+            if not warns_data[guild_id_str][target_user_id]:
+                del warns_data[guild_id_str][target_user_id]
             if not warns_data[guild_id_str]:
                 del warns_data[guild_id_str]
                 
@@ -578,16 +589,16 @@ def setup_commands(bot: commands.Bot):
                 
             embed = discord.Embed(
                 title="🔓 Warning Removed",
-                description=f"Warning `{warn_id}` has been removed.",
+                description=f"Warning `{warn_id}` has been successfully removed.",
                 color=0x2ECC71
             )
-            embed.add_field(name="Belonged to", value=member_name, inline=True)
-            embed.add_field(name="Reason", value=target_warn['reason'], inline=True)
+            embed.add_field(name="Member", value=member_name, inline=True)
+            embed.add_field(name="Reason was", value=target_warn['reason'], inline=True)
             await ctx.send(embed=embed)
         else:
             embed = discord.Embed(
                 title="⚠️ Warning Not Found",
-                description=f"No warning with ID `{warn_id}` was found in this server.",
+                description=f"No warning with ID `{warn_id}` was found in this server.\nUse `+warns <member>` to see valid Warn IDs.",
                 color=0xE74C3C
             )
             await ctx.send(embed=embed)
