@@ -533,8 +533,8 @@ def setup_commands(bot: commands.Bot):
         for w in user_warns:
             t = time.strftime('%m/%d/%Y %H:%M:%S', time.gmtime(w['timestamp']))
             embed.add_field(
-                name=f"ID: `{w['warn_id']}`",
-                value=f"**Reason:** {w['reason']}\n**Mod:** {w['moderator_name']} (ID: {w['moderator_id']})\n**Date:** {t}",
+                name=f"⚠️ Warn `{w['warn_id']}`",
+                value=f"**Reason:** {w['reason']}\n**Moderator:** {w['moderator_name']}\n**Date:** {t}",
                 inline=False
             )
             
