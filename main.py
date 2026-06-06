@@ -28,7 +28,10 @@ def load_warns():
         return {}
     try:
         with open(WARNS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            return {}
     except Exception:
         return {}
 
