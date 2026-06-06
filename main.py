@@ -4,6 +4,10 @@ import os
 import sys
 import time
 import random
+import json
+import uuid
+import re
+import datetime
 from dotenv import load_dotenv
 
 # Styling constants
@@ -16,6 +20,45 @@ CYAN = "\033[96m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
+WARNS_FILE = "warns.json"
+
+# Helper functions for warnings database
+def load_warns():
+    if not os.path.exists(WARNS_FILE):
+        return {}
+    try:
+        with open(WARNS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_warns(data):
+    try:
+        with open(WARNS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving warns.json: {e}")
+
+# Helper function for duration parsing (e.g. 10m, 2h, 1d)
+def parse_duration(duration_str: str) -> datetime.timedelta:
+    match = re.match(r"^(\d+)([smhd])$", duration_str.lower())
+    if not match:
+        raise ValueError("Invalid duration format. Use e.g. 10m, 2h, 1d.")
+    
+    amount = int(match.group(1))
+    unit = match.group(2)
+    
+    if unit == 's':
+        return datetime.timedelta(seconds=amount)
+    elif unit == 'm':
+        return datetime.timedelta(minutes=amount)
+    elif unit == 'h':
+        return datetime.timedelta(hours=amount)
+    elif unit == 'd':
+        return datetime.timedelta(days=amount)
+    else:
+        raise ValueError("Invalid unit. Use s, m, h, or d.")
+
 class HelpDropdown(discord.ui.Select):
     def __init__(self, bot):
         self.bot = bot
@@ -23,8 +66,7 @@ class HelpDropdown(discord.ui.Select):
             discord.SelectOption(label="Home", description="Go back to the help menu home page.", emoji="📖", value="home"),
             discord.SelectOption(label="Utilities", description="Information and utility commands.", emoji="🛠️", value="utils"),
             discord.SelectOption(label="Moderation", description="Commands to manage the server.", emoji="⚖️", value="mod"),
-            discord.SelectOption(label="Entertainment", description="Games and fun commands.", emoji="🎮", value="fun"),
-            discord.SelectOption(label="System", description="System administration commands.", emoji="⚙️", value="sys")
+            discord.SelectOption(label="Entertainment", description="Games and fun commands.", emoji="🎮", value="fun")
         ]
         super().__init__(placeholder="Choose a category...", min_values=1, max_values=1, options=options)
 
@@ -77,18 +119,13 @@ def get_help_embed(category: str, bot, user) -> discord.Embed:
             inline=False
         )
         embed.add_field(
-            name="⚖️ Moderation",
-            value="`+kick`, `+ban`, `+warn`",
+            name="⚖️ Moderation Tools",
+            value="`+warn`, `+unwarn`, `+warns`, `+mute`, `+unmute`, `+kick`, `+ban`, `+unban`, `+softban`, `+lock`, `+unlock`, `+slowmode`",
             inline=False
         )
         embed.add_field(
             name="🎮 Entertainment",
             value="`+roll`, `+8ball`",
-            inline=False
-        )
-        embed.add_field(
-            name="⚙️ System",
-            value="`+stop`",
             inline=False
         )
         embed.set_footer(text="Choose a category in the dropdown menu below!", icon_url=user_avatar)
@@ -117,9 +154,18 @@ def get_help_embed(category: str, bot, user) -> discord.Embed:
             description="Commands to ensure the safety and organization of your server:",
             color=0xE67E22
         )
+        embed.add_field(name="`+warn <member> <reason>`", value="Warns a member, logs it with a unique Warn ID in warns.json, and DMs them.", inline=False)
+        embed.add_field(name="`+unwarn <warn_id>`", value="Removes a specific warning from the user using its Warn ID.", inline=False)
+        embed.add_field(name="`+warns <member>`", value="Lists all active warnings for the given member.", inline=False)
+        embed.add_field(name="`+mute <member> <duration> [reason]`", value="Tempmutes (timeouts) a member (e.g., `10m`, `2h`, `1d`). Max: 28 days.", inline=False)
+        embed.add_field(name="`+unmute <member> [reason]`", value="Removes mute (timeout) from a member.", inline=False)
         embed.add_field(name="`+kick <member> [reason]`", value="Kicks the targeted member from the server.", inline=False)
         embed.add_field(name="`+ban <member> [reason]`", value="Permanently bans the targeted member from the server.", inline=False)
-        embed.add_field(name="`+warn <member> <reason>`", value="Sends a formal warning via DM to the member and notifies in the chat.", inline=False)
+        embed.add_field(name="`+unban <user_id> [reason]`", value="Unbans a user from the server using their User ID.", inline=False)
+        embed.add_field(name="`+softban <member> [reason]`", value="Bans and immediately unbans a member to prune their messages from the last 7 days.", inline=False)
+        embed.add_field(name="`+lock [reason]`", value="Locks the current channel so default members cannot send messages.", inline=False)
+        embed.add_field(name="`+unlock`", value="Unlocks the current channel.", inline=False)
+        embed.add_field(name="`+slowmode <seconds>`", value="Sets slowmode cooldown (0 to 21600 seconds) for the current channel.", inline=False)
         embed.set_footer(text="Category: Moderation", icon_url=user_avatar)
         return embed
 
@@ -132,16 +178,6 @@ def get_help_embed(category: str, bot, user) -> discord.Embed:
         embed.add_field(name="`+roll [max]`", value="Rolls a virtual die. Default maximum value is 100.", inline=False)
         embed.add_field(name="`+8ball <question>`", value="Ask the Magic 8-Ball a question and get a mystical response.", inline=False)
         embed.set_footer(text="Category: Entertainment", icon_url=user_avatar)
-        return embed
-
-    elif category == "sys":
-        embed = discord.Embed(
-            title="⚙️ System Commands",
-            description="Internal bot administration options:",
-            color=0xE74C3C
-        )
-        embed.add_field(name="`+stop`", value="Cleanly stops the Discord bot. Accessible only to the bot owner or server administrators.", inline=False)
-        embed.set_footer(text="Category: System", icon_url=user_avatar)
         return embed
 
 def setup_commands(bot: commands.Bot):
@@ -184,43 +220,6 @@ def setup_commands(bot: commands.Bot):
             embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
                 
             await ctx.send(embed=embed)
-
-    @bot.command(name="stop", help="Cleanly stops the bot.")
-    async def stop(ctx):
-        is_owner = False
-        try:
-            app_info = await bot.application_info()
-            is_owner = (ctx.author.id == app_info.owner.id) or (app_info.team and ctx.author.id in [m.id for m in app_info.team.members])
-        except Exception:
-            pass
-            
-        is_admin = ctx.author.guild_permissions.administrator if ctx.guild else False
-        
-        if not (is_owner or is_admin):
-            embed = discord.Embed(
-                title="🚫 Access Denied",
-                description="Only server administrators or the bot owner can execute this command.",
-                color=0xE74C3C # Red
-            )
-            await ctx.send(embed=embed)
-            return
-
-        embed = discord.Embed(
-            title="🔌 Disconnecting...",
-            description="The bot is shutting down cleanly. Thank you for using **AmeoPersonalAssistant**!",
-            color=0xE74C3C # Red
-        )
-        
-        if bot.user.avatar:
-            embed.set_thumbnail(url=bot.user.avatar.url)
-            
-        await ctx.send(embed=embed)
-        
-        print(f"\n{RED}[SYSTEM] Stop signal received from {ctx.author} (ID: {ctx.author.id}).{RESET}")
-        print(f"{YELLOW}[SYSTEM] Closing connection with Discord...{RESET}")
-        
-        await bot.close()
-        print(f"{GREEN}[SUCCESS] Connection closed. The bot is offline.{RESET}")
 
     @bot.command(name="help", help="Displays the list of all available commands.")
     async def help_cmd(ctx):
@@ -386,31 +385,399 @@ def setup_commands(bot: commands.Bot):
             )
             await ctx.send(embed=embed)
 
-    @bot.command(name="warn", help="Warns a member.")
-    @commands.has_permissions(kick_members=True)
-    async def warn(ctx, member: discord.Member, *, reason: str):
+    @bot.command(name="unban", help="Unbans a user from the server using their ID.")
+    @commands.has_permissions(ban_members=True)
+    async def unban(ctx, user_id: int, *, reason: str = "No reason provided"):
         try:
-            embed_dm = discord.Embed(
-                title="⚠️ Warning",
-                description=f"You have received a warning on the server **{ctx.guild.name}**.",
-                color=0xF1C40F
-            )
-            embed_dm.add_field(name="Reason", value=reason)
-            embed_dm.add_field(name="Given by", value=ctx.author.name)
-            await member.send(embed=embed_dm)
-            
+            user = await bot.fetch_user(user_id)
+            await ctx.guild.unban(user, reason=reason)
             embed = discord.Embed(
-                title="⚠️ Warning Registered",
-                description=f"**{member.name}** has received a warning.",
-                color=0xF1C40F
+                title="🔓 User Unbanned",
+                description=f"**{user.name}** (ID: {user_id}) has been unbanned.",
+                color=0x2ECC71
             )
-            embed.add_field(name="Reason", value=reason)
-            embed.add_field(name="Moderator", value=ctx.author.mention)
+            embed.add_field(name="Reason", value=reason, inline=False)
+            await ctx.send(embed=embed)
+        except discord.NotFound:
+            embed = discord.Embed(
+                title="⚠️ Unban Error",
+                description="This user is not banned or does not exist.",
+                color=0xE74C3C
+            )
             await ctx.send(embed=embed)
         except Exception as e:
             embed = discord.Embed(
-                title="⚠️ Warning Error",
-                description=f"Could not send the warning to this member: {e}",
+                title="⚠️ Unban Error",
+                description=f"Could not unban this user: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="softban", help="Bans and immediately unbans a member to prune their messages.")
+    @commands.has_permissions(ban_members=True)
+    async def softban(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+        if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
+            embed = discord.Embed(
+                title="🚫 Access Denied",
+                description="You cannot softban this member because they possess a role equivalent to or higher than yours.",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            embed_dm = discord.Embed(
+                title="🚪 Softban",
+                description=f"You have been softbanned from **{ctx.guild.name}**.",
+                color=0xE74C3C
+            )
+            embed_dm.add_field(name="Reason", value=reason)
+            await member.send(embed=embed_dm)
+        except Exception:
+            pass
+
+        try:
+            await ctx.guild.ban(member, reason=f"Softban: {reason}", delete_message_seconds=604800)
+            await ctx.guild.unban(member, reason="Softban cleanup")
+            
+            embed = discord.Embed(
+                title="🧽 Member Softbanned",
+                description=f"**{member.name}** has been softbanned (kicked and messages pruned).",
+                color=0x2ECC71
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Softban Error",
+                description=f"Could not softban this member: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="warn", help="Warns a member and logs it in the system with a unique ID.")
+    @commands.has_permissions(kick_members=True)
+    async def warn(ctx, member: discord.Member, *, reason: str):
+        warn_id = str(uuid.uuid4())[:8]
+        timestamp = time.time()
+        
+        guild_id_str = str(ctx.guild.id)
+        user_id_str = str(member.id)
+        
+        warns_data = load_warns()
+        if guild_id_str not in warns_data:
+            warns_data[guild_id_str] = {}
+        if user_id_str not in warns_data[guild_id_str]:
+            warns_data[guild_id_str][user_id_str] = []
+            
+        warn_entry = {
+            "warn_id": warn_id,
+            "reason": reason,
+            "moderator_id": ctx.author.id,
+            "moderator_name": ctx.author.name,
+            "timestamp": timestamp
+        }
+        
+        warns_data[guild_id_str][user_id_str].append(warn_entry)
+        save_warns(warns_data)
+        
+        try:
+            embed_dm = discord.Embed(
+                title="⚠️ Warning Received",
+                description=f"You have received a warning on the server **{ctx.guild.name}**.",
+                color=0xF1C40F
+            )
+            embed_dm.add_field(name="Reason", value=reason, inline=False)
+            embed_dm.add_field(name="Given by", value=ctx.author.name, inline=True)
+            embed_dm.add_field(name="Warn ID", value=f"`{warn_id}`", inline=True)
+            await member.send(embed=embed_dm)
+        except Exception:
+            pass
+            
+        embed = discord.Embed(
+            title="⚠️ Warning Registered",
+            description=f"**{member.name}** has been warned.",
+            color=0xF1C40F
+        )
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Moderator", value=ctx.author.mention, inline=True)
+        embed.add_field(name="Warn ID", value=f"`{warn_id}`", inline=True)
+        await ctx.send(embed=embed)
+
+    @bot.command(name="warns", help="Lists all warnings of a user.")
+    @commands.has_permissions(kick_members=True)
+    async def warns(ctx, member: discord.Member):
+        guild_id_str = str(ctx.guild.id)
+        user_id_str = str(member.id)
+        
+        warns_data = load_warns()
+        user_warns = warns_data.get(guild_id_str, {}).get(user_id_str, [])
+        
+        if not user_warns:
+            embed = discord.Embed(
+                title="📭 No Warnings Found",
+                description=f"**{member.name}** has no registered warnings.",
+                color=0x2ECC71
+            )
+            await ctx.send(embed=embed)
+            return
+            
+        embed = discord.Embed(
+            title=f"⚠️ Warnings for {member.name} ({len(user_warns)})",
+            color=0xF1C40F
+        )
+        
+        for w in user_warns:
+            t = time.strftime('%m/%d/%Y %H:%M:%S', time.gmtime(w['timestamp']))
+            embed.add_field(
+                name=f"ID: `{w['warn_id']}`",
+                value=f"**Reason:** {w['reason']}\n**Mod:** {w['moderator_name']} (ID: {w['moderator_id']})\n**Date:** {t}",
+                inline=False
+            )
+            
+        await ctx.send(embed=embed)
+
+    @bot.command(name="unwarn", help="Removes a warning using its unique Warn ID.")
+    @commands.has_permissions(kick_members=True)
+    async def unwarn(ctx, warn_id: str):
+        guild_id_str = str(ctx.guild.id)
+        warns_data = load_warns()
+        
+        guild_warns = warns_data.get(guild_id_str, {})
+        found = False
+        target_user_id = None
+        target_warn = None
+        
+        for user_id, user_list in guild_warns.items():
+            for w in user_list:
+                if w['warn_id'] == warn_id:
+                    target_user_id = user_id
+                    target_warn = w
+                    user_list.remove(w)
+                    found = True
+                    break
+            if found:
+                break
+                
+        if found:
+            if not guild_warns[target_user_id]:
+                del guild_warns[target_user_id]
+            if not warns_data[guild_id_str]:
+                del warns_data[guild_id_str]
+                
+            save_warns(warns_data)
+            
+            try:
+                member_user = await bot.fetch_user(int(target_user_id))
+                member_name = member_user.name
+            except Exception:
+                member_name = f"ID: {target_user_id}"
+                
+            embed = discord.Embed(
+                title="🔓 Warning Removed",
+                description=f"Warning `{warn_id}` has been removed.",
+                color=0x2ECC71
+            )
+            embed.add_field(name="Belonged to", value=member_name, inline=True)
+            embed.add_field(name="Reason", value=target_warn['reason'], inline=True)
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="⚠️ Warning Not Found",
+                description=f"No warning with ID `{warn_id}` was found in this server.",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="mute", help="Mutes (timeouts) a member for a set duration. Format: +mute <member> <duration> [reason] (e.g. 10m, 1h, 1d)")
+    @commands.has_permissions(moderate_members=True)
+    async def mute(ctx, member: discord.Member, duration: str, *, reason: str = "No reason provided"):
+        if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
+            embed = discord.Embed(
+                title="🚫 Access Denied",
+                description="You cannot mute this member because they possess a role equivalent to or higher than yours.",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            delta = parse_duration(duration)
+            if delta.days > 28:
+                raise ValueError("Max duration is 28 days.")
+        except ValueError as e:
+            embed = discord.Embed(
+                title="⚠️ Invalid Duration",
+                description=f"{e}\nUsage: `+mute <member> <duration> [reason]` (e.g., `10m`, `2h`, `1d`).",
+                color=0xF1C40F
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            await member.timeout(delta, reason=reason)
+            embed = discord.Embed(
+                title="🔇 Member Muted",
+                description=f"**{member.name}** has been muted for `{duration}`.",
+                color=0x2ECC71
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Muted until", value=discord.utils.format_dt(discord.utils.utcnow() + delta, style='R'), inline=False)
+            await ctx.send(embed=embed)
+            
+            try:
+                embed_dm = discord.Embed(
+                    title="🔇 Muted",
+                    description=f"You have been muted in **{ctx.guild.name}** for `{duration}`.",
+                    color=0xE74C3C
+                )
+                embed_dm.add_field(name="Reason", value=reason)
+                await member.send(embed=embed_dm)
+            except Exception:
+                pass
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Mute Error",
+                description=f"Could not mute this member: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="unmute", help="Unmutes (removes timeout from) a member.")
+    @commands.has_permissions(moderate_members=True)
+    async def unmute(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+        if not member.is_timed_out():
+            embed = discord.Embed(
+                title="⚠️ Member Not Muted",
+                description=f"**{member.name}** is not currently muted.",
+                color=0xF1C40F
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            await member.timeout(None, reason=reason)
+            embed = discord.Embed(
+                title="🔊 Member Unmuted",
+                description=f"**{member.name}** has been unmuted.",
+                color=0x2ECC71
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            await ctx.send(embed=embed)
+            
+            try:
+                embed_dm = discord.Embed(
+                    title="🔊 Unmuted",
+                    description=f"You have been unmuted in **{ctx.guild.name}**.",
+                    color=0x2ECC71
+                )
+                await member.send(embed=embed_dm)
+            except Exception:
+                pass
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Unmute Error",
+                description=f"Could not unmute this member: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="lock", help="Locks the current channel so members cannot send messages.")
+    @commands.has_permissions(manage_channels=True)
+    async def lock(ctx, *, reason: str = "No reason provided"):
+        channel = ctx.channel
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        
+        if overwrite.send_messages is False:
+            embed = discord.Embed(
+                title="⚠️ Channel Already Locked",
+                description="This channel is already locked.",
+                color=0xF1C40F
+            )
+            await ctx.send(embed=embed)
+            return
+
+        overwrite.send_messages = False
+        try:
+            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=reason)
+            embed = discord.Embed(
+                title="🔒 Channel Locked",
+                description=f"This channel has been locked.",
+                color=0xE74C3C
+            )
+            embed.add_field(name="Reason", value=reason, inline=False)
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Lock Error",
+                description=f"Could not lock this channel: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="unlock", help="Unlocks the current channel so members can send messages again.")
+    @commands.has_permissions(manage_channels=True)
+    async def unlock(ctx):
+        channel = ctx.channel
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        
+        if overwrite.send_messages is not False:
+            embed = discord.Embed(
+                title="⚠️ Channel Already Unlocked",
+                description="This channel is not locked.",
+                color=0xF1C40F
+            )
+            await ctx.send(embed=embed)
+            return
+
+        overwrite.send_messages = None
+        try:
+            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="Channel unlocked")
+            embed = discord.Embed(
+                title="🔓 Channel Unlocked",
+                description="This channel has been unlocked.",
+                color=0x2ECC71
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Unlock Error",
+                description=f"Could not unlock this channel: {e}",
+                color=0xE74C3C
+            )
+            await ctx.send(embed=embed)
+
+    @bot.command(name="slowmode", help="Sets the slowmode (cooldown) in seconds for the current channel.")
+    @commands.has_permissions(manage_channels=True)
+    async def slowmode(ctx, seconds: int):
+        if seconds < 0 or seconds > 21600:
+            embed = discord.Embed(
+                title="⚠️ Invalid Slowmode Value",
+                description="Please specify a number between 0 (disabled) and 21600 (6 hours).",
+                color=0xF1C40F
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            await ctx.channel.edit(slowmode_delay=seconds)
+            if seconds == 0:
+                embed = discord.Embed(
+                    title="⏲️ Slowmode Disabled",
+                    description="Slowmode has been disabled for this channel.",
+                    color=0x2ECC71
+                )
+            else:
+                embed = discord.Embed(
+                    title="⏲️ Slowmode Updated",
+                    description=f"Slowmode has been set to `{seconds}` seconds.",
+                    color=0x2ECC71
+                )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(
+                title="⚠️ Slowmode Error",
+                description=f"Could not set slowmode: {e}",
                 color=0xE74C3C
             )
             await ctx.send(embed=embed)
@@ -493,10 +860,7 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix=command_prefix, intents=intents)
 
     async def setup_hook(self):
-        # Remove default help command
         self.remove_command('help')
-        
-        # Load commands
         setup_commands(self)
 
     async def on_ready(self):
@@ -536,9 +900,7 @@ class MyBot(commands.Bot):
         print(f"{BLUE}[SYSTEM]{RESET} Listening for commands with prefix '{self.command_prefix}' successfully enabled.\n")
 
 def main():
-    # Load environment variables from .env
     load_dotenv()
-    
     token = os.getenv("DISCORD_TOKEN")
     
     if not token:
@@ -546,15 +908,12 @@ def main():
         print("Please edit the .env file and paste your Discord bot token.")
         sys.exit(1)
         
-    # Configure default intents and enable message content intent
     intents = discord.Intents.default()
     intents.message_content = True
     
-    # Initialize our custom bot
     bot = MyBot(command_prefix="+", intents=intents)
     
     try:
-        # Start the bot
         bot.run(token)
     except discord.errors.LoginFailure:
         print(f"\n{RED}[ERROR] Login failed. The DISCORD_TOKEN provided in the .env file is invalid.{RESET}")
